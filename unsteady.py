@@ -340,4 +340,14 @@ if __name__ == '__main__':
         U_exact.append(analytical_solution((t + 1) * dt))
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         result = list(executor.map(run_process, key))
+    plt.figure()
+    plt.plot(np.arange(Nt) * dt, U_heb['5pt'], label='5pt')
+    plt.plot(np.arange(Nt) * dt, U_heb['5pt+t'], label='5pt+t')
+    plt.plot(np.arange(Nt) * dt, U_heb['9pt'], label='9pt')
+    plt.plot(np.arange(Nt) * dt, U_heb['9pt+t'], label='9pt+t')
+    plt.title('HEB')
+    plt.legend()
+    plt.gca().set_yscale('log')
+    plt.xlabel('t')
+    plt.savefig('unsteady_heb')
 
