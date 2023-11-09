@@ -1,108 +1,82 @@
 from mpl_toolkits.axes_grid1 import ImageGrid
 from scipy.sparse import lil_matrix
-from scipy.sparse.linalg import spsolve
+from scipy.sparse.linalg import splu, bicgstab
 import numpy as np
 import matplotlib.pyplot as plt
 
-N = M = 202
+N = M = 16
 h = 1.0 / (N - 1)
-A_sparse = lil_matrix((N * M, N * M))
-Y = np.zeros(N * M)
-
+A = {'5pt': lil_matrix((N * M, N * M)), '9pt': lil_matrix((N * M, N * M))}
+X = {'5pt': None, '9pt': None}
+X_ = {'5pt': None, '9pt': None}
+LU = {'5pt': None, '9pt': None}
+keys = ['5pt', '9pt']
+Y = np.zeros(N * M).reshape(N, M)
 
 for i in range(N):
     for j in range(M):
-        k = i * N + j
+        idx = i + j * N
 
-        # Center point (main diagonal)
-        A_sparse[k, k] = 4 / h ** 2
+        A['5pt'][idx, idx] = 4
 
-        if i > 0:  # left
-            A_sparse[k, k - N] = -1 / h ** 2
-        if i < N - 1:  # right
-            A_sparse[k, k + N] = -1 / h ** 2
-        if j > 0:  # below
-            A_sparse[k, k - 1] = -1 / h ** 2
-        if j < M - 1:  # above
-            A_sparse[k, k + 1] = -1 / h ** 2
+        if i == N - 1 or j == M - 1:  # Правая и верхняя границы (условие Дирихле)
+            A['5pt'][idx, idx] = 1
+            continue
 
-# Apply Dirichlet boundary conditions on the top border (U=1)
-for j in range(M):
-    k = (N - 1) * N + j
-    A_sparse[k, :] = 0
-    A_sparse[k, k] = 1
-    Y[k] = 1
+        if i == 0 and j == 0:  # Угловая точка (0, 0)
+            A['5pt'][idx, idx] = 1
+            continue
 
-# Apply Dirichlet boundary conditions for U=0 on the other borders
-# Left border
-for i in range(1, N - 1):
-    k = i * N
-    A_sparse[k, :] = 0
-    A_sparse[k, k] = 1
-    Y[k] = 0
-
-# Right border
-for i in range(1, N - 1):
-    k = i * N + (M - 1)
-    A_sparse[k, :] = 0
-    A_sparse[k, k] = 1
-    Y[k] = 0
-
-# Bottom border
-for j in range(1, M - 1):
-    k = j
-    A_sparse[k, :] = 0
-    A_sparse[k, k] = 1
-    Y[k] = 0
+        if i == 0:  # Левая граница
+            A['5pt'][idx, idx] = 1
 
 
-# Initialize the sparse A matrix again
-A_sparse_9pt = lil_matrix((N * M, N * M))
+        elif j == 0:  # Нижняя граница
+            A['5pt'][idx, idx] = 1
 
-# Fill in the A matrix using 9-point stencil
-for i in range(1, N - 1):
-    for j in range(1, M - 1):
-        k = i * N + j
-        A_sparse_9pt[k, k] = 20 / 6 / h ** 2  # main diagonal
-        A_sparse_9pt[k, k - 1] = A_sparse_9pt[k, k + 1] = A_sparse_9pt[k, k - N] = A_sparse_9pt[
-            k, k + N] = -4 / 6 / h ** 2  # direct neighbors
-        A_sparse_9pt[k, k - N - 1] = A_sparse_9pt[k, k - N + 1] = A_sparse_9pt[k, k + N - 1] = A_sparse_9pt[
-            k, k + N + 1] = -1 / 6 / h ** 2  # diagonal neighbors
+        else:  # Внутренние узлы
+            A['5pt'][idx, idx - 1] = A['5pt'][idx, idx + 1] = A['5pt'][idx, idx - N] = A['5pt'][idx, idx + N] = -1
 
-# Apply Dirichlet boundary conditions as before
-# Top boundary
-for j in range(M):
-    k = j
-    A_sparse_9pt[k, :] = 0
-    A_sparse_9pt[k, k] = 1
+for i in range(N):
+    for j in range(M):
+        idx = i + j * N
 
-# Bottom boundary
-for j in range(M):
-    k = (N - 1) * N + j
-    A_sparse_9pt[k, :] = 0
-    A_sparse_9pt[k, k] = 1
+        A['9pt'][idx, idx] = 8 / 3
 
-# Left boundary
-for i in range(1, N - 1):
-    k = i * N
-    A_sparse_9pt[k, :] = 0
-    A_sparse_9pt[k, k] = 1
+        if i == 0 and j == 0:
+            A['5pt'][idx, idx] = 1
+            continue
 
-# Right boundary
-for i in range(1, N - 1):
-    k = i * N + (M - 1)
-    A_sparse_9pt[k, :] = 0
-    A_sparse_9pt[k, k] = 1
+        if i == N - 1 or j == M - 1:  # Правая и верхняя границы (условие Дирихле)
+            A['9pt'][idx, idx] = 1
 
-A_sparse_9pt = A_sparse_9pt.tocsr()
-A_sparse = A_sparse.tocsr()
-print(not (A_sparse - A_sparse_9pt).nnz == 0)
-X = spsolve(A_sparse, Y)
-solution = X.reshape(N, M)
-X_9pt = spsolve(A_sparse_9pt, Y)
-solution_9pt = X_9pt.reshape(N, M)
-difference = np.abs(solution - solution_9pt)
-difference_norm = np.linalg.norm(solution - solution_9pt)
+        # Левая граница (условие Неймана)
+        elif i == 0:
+            A['5pt'][idx, idx] = 1
+
+        # Нижняя граница (условие Неймана)
+        elif j == 0:
+            A['5pt'][idx, idx] = 1
+
+        # Верхняя и правая границы (условие Дирихле)
+        else:
+            # ближайшие соседи
+            A['9pt'][idx, idx + 1] = A['9pt'][idx, idx - 1] = A['9pt'][idx, idx + N] = A['9pt'][
+                idx, idx - N] = - 1 / 3
+
+            # диагональные элементы
+            A['9pt'][idx, idx + N + 1] = A['9pt'][idx, idx - N - 1] = A['9pt'][idx, idx + N - 1] = A['9pt'][
+                idx, idx - N + 1] = - 1 / 3
+
+Y[-1, :] = 1
+
+for key in keys:
+    LU[key] = splu(A[key].tocsc())
+    X[key] = LU[key].solve(Y.flatten()).reshape(N, M)
+    X_[key], exitcode = bicgstab(A[key].tocsc(), Y.flatten(), tol=1e-9)
+difference = np.abs(X['5pt'] - X['9pt'])
+difference_norm = np.linalg.norm(X['5pt'] - X['9pt'])
+
 fig = plt.figure(figsize=(15, 5))
 grid = ImageGrid(fig, 111,
                  nrows_ncols=(1, 3),
@@ -118,14 +92,14 @@ grid = ImageGrid(fig, 111,
 for i, ax in enumerate(grid):
     match i:
         case 0:
-            im = ax.imshow(solution, origin='lower', cmap='plasma', extent=[0, 1, 0, 1])
+            im = ax.imshow(X['5pt'], origin='lower', cmap='plasma', extent=[0, 1, 0, 1])
             ax.set_title('Численное решение 5-ти точечный шаблон')
             ax.set_xlabel('x')
             ax.set_ylabel('y')
             ax.cax.colorbar(im)
             ax.cax.toggle_label(True)
         case 1:
-            im = ax.imshow(solution_9pt, origin='lower', cmap='plasma', extent=[0, 1, 0, 1])
+            im = ax.imshow(X['9pt'], origin='lower', cmap='plasma', extent=[0, 1, 0, 1])
             ax.set_title('Численное решение 9-ти точечный шаблон')
             ax.set_xlabel('x')
             ax.set_ylabel('y')
@@ -140,4 +114,4 @@ for i, ax in enumerate(grid):
             ax.cax.toggle_label(True)
 plt.tight_layout()
 plt.savefig(f'steady')
-print(solution)
+# print(solution)
